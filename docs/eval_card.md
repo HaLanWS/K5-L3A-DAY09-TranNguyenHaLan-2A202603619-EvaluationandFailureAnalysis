@@ -48,3 +48,20 @@ Card này đi kèm mỗi báo cáo đánh giá và được sử dụng làm cơ
 - **Phạm vi pilot:** Áp dụng xử lý tự động khiếu nại hoàn tiền đơn hàng nội thành LOGIX_LOCAL với mức hoàn dưới 500.000đ. Các trường hợp tranh chấp pháp lý hoặc nghi vấn gian lận chuyển sang xử lý thủ công (human-in-the-loop).
 - **Giới hạn / bằng chứng còn thiếu:** Môi trường đo đạc dựa trên MockLLM, tập eval set gồm 14 cases tổng hợp; chưa tiến hành thử nghiệm A/B test trực tiếp trên khách hàng thời gian thực.
 - **Khi nào tăng eval-set version:** Khi cập nhật thêm các case biên từ trace khách hàng thực tế (v2) hoặc khi chính sách bồi thường bổ sung điều khoản mới.
+
+---
+
+## Bổ sung v2: Advanced / Expert Evaluation (M5–M7)
+
+- **Eval set v2:** `data/eval/eval_set_v2.jsonl` (28 items: 14 public + 14 adversarial, SHA `096ec710f370`), labels tại `data/eval/labels_v2.json`.
+- **Baseline v2:** `reports/baseline_v2.json` (Run ID: `E-swarm-20261118-096e`, pass_rate = 0.9786, pass_hat_5 = 0.8929).
+- **Phân tích nhiễu A/A (`--aa 66,77,88,99,110`):**
+  - Chạy A/A trên 2 bộ seed cho kết quả $\Delta = 0.0000$ trên MockLLM vì MockLLM là hàm xác định (deterministic).
+  - Đối với LLM thật trong sản xuất, dải nhiễu A/A dao động tự nhiên quanh mức $\pm 2\% - 5\%$ do nhiệt độ sampling (temperature > 0) và thay đổi ngữ cảnh sinh token. Vì vậy, các ngưỡng sàn (floors) bắt buộc phải nằm ngoài dải nhiễu này (ví dụ: pass_rate sàn 0.85, pass_hat_5 sàn 0.80) để tránh báo động giả (false alarms).
+- **Thiết kế Slice Gate và cơ chế bắt lỗi:**
+  - `slice:money_movement/pass_rate` (ngưỡng min: 0.90): Bắt gọn lỗi hồi quy `slice_regression` (cộng dồn điều khoản trên các seed lẻ). Khi đó pass_rate trung bình toàn bộ eval set vẫn đạt 0.9357 (trên sàn 0.85) và CI chạm 0, nhưng slice gate `money_movement` tụt xuống 0.8500 và chặn đứng PR (`exit 1`).
+  - `pass_hat_5` (ngưỡng min: 0.80): Bắt lỗi không ổn định `flaky_regression` (lỗi làm tròn xuất hiện ngẫu nhiên 1 trong 5 seed). Metric `pass_rate` trung bình không đủ nhạy để chặn ổn định, nhưng ước lượng không chệch $\widehat{\text{pass}}^5$ rơi xuống dưới 0.80 và kích hoạt chặn release.
+  - `slice:adversarial/pass_rate` & `slice:denial/pass_rate`: Đảm bảo các kịch bản tấn công biên và từ chối bồi thường không bị suy giảm chất lượng.
+- **Giới hạn cỡ mẫu & khuyến nghị:**
+  - Với tập kiểm định 5 seeds, các lỗi chỉ xuất hiện ở 1/3 seed (`rare`, xác suất ~33%) hoặc lỗi cực hiếm (<10%) không thể được phát hiện một cách ổn định do giới hạn thống kê của cỡ mẫu nhỏ. Không được hạ ngưỡng giả tạo để "bắt" các lỗi này vì sẽ làm tăng đột biến tỷ lệ báo động giả trên các bản refactor vô hại (`honest_refactor`).
+  - Để giám sát các lỗi hiếm trong production, cần tăng số lượng seed hoặc áp dụng cơ chế đánh giá trực tiếp trên luồng lưu lượng thực tế (canary deployment + real-time guardrails).
